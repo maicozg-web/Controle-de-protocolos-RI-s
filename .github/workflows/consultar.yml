@@ -2,40 +2,40 @@ name: Consultar Protocolos RI
 
 on:
   schedule:
-      - cron: "0 11 * * *"
-        workflow_dispatch: {}
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}
 
-        jobs:
-          consultar:
-              runs-on: ubuntu-latest
-                  steps:
-                        - name: Checkout do repositorio
-                                uses: actions/checkout@v4
+jobs:
+  consultar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
 
-                                      - name: Configurar Python
-                                              uses: actions/setup-python@v5
-                                                      with:
-                                                                python-version: "3.11"
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-                                                                      - name: Instalar dependencias
-                                                                              run: |
-                                                                                        pip install -r requirements.txt
-                                                                                                  playwright install --with-deps chromium
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
 
-                                                                                                        - name: Rodar consulta
-                                                                                                                env:
-                                                                                                                          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-                                                                                                                                    GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-                                                                                                                                              EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
-                                                                                                                                                        EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
-                                                                                                                                                                  EMAIL_USER: ${{ secrets.EMAIL_USER }}
-                                                                                                                                                                            EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-                                                                                                                                                                                      EMAIL_TO: ${{ secrets.EMAIL_TO }}
-                                                                                                                                                                                              run: python scripts/consultar_protocolos.py
-                                                                                                                                                                                              
-                                                                                                                                                                                                    - name: Guardar relatorio como artefato
-                                                                                                                                                                                                            uses: actions/upload-artifact@v4
-                                                                                                                                                                                                                    with:
-                                                                                                                                                                                                                              name: relatorio-protocolos-ri
-                                                                                                                                                                                                                                        path: output/
-                                                                                                                                                                                                                                                  retention-days: 30
+      - name: Rodar consulta
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: python scripts/consultar_protocolos.py
+
+      - name: Guardar relatorio como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-protocolos-ri
+          path: output/
+          retention-days: 30
