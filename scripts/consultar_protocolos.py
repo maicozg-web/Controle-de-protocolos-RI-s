@@ -94,7 +94,7 @@ def carregar_protocolos():
         _, sh = _google_client()
         if sh is not None:
             ws = sh.worksheet("Cadastro")
-            registros = ws.get_all_records()
+            registros = ws.get_all_records(expected_headers=["Protocolo", "Senha", "Referência"])
             protocolos = []
             for r in registros:
                 protocolo = str(r.get("Protocolo", "")).strip()
