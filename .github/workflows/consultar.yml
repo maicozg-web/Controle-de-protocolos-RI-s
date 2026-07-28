@@ -2,7 +2,9 @@ name: Consultar Protocolos RI
 
 on:
   schedule:
-    - cron: "0 11 * * *"
+    - cron: "0 11 * * 1-5"
+    - cron: "0 15 * * 1-5"
+    - cron: "59 20 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
@@ -37,5 +39,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: relatorio-protocolos-ri
-          path: output/
-          retention-days: 30
+          path: output/relatorio_protocolos_ri.xlsx
