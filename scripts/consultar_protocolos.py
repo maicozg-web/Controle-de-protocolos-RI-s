@@ -349,7 +349,7 @@ def atualizar_google_sheets(resultados):
             exig_cols = []
             for i in range(max_exig):
                 if i < len(links):
-                    exig_cols.append(f'=HYPERLINK("{links[i]}","Baixar PDF")'
+                    exig_cols.append(f'=HYPERLINK("{links[i]}","Baixar PDF")')
                 else:
                     exig_cols.append("")
 
@@ -401,7 +401,7 @@ def enviar_email(resultados, anexo_planilha):
     port = int(os.environ.get("EMAIL_PORT", "587"))
     user = os.environ.get("EMAIL_USER")
     senha = os.environ.get("EMAIL_PASS")
-    destinatarios = os.environ.get(""EMAIL_TO", "")
+    destinatarios = os.environ.get("EMAIL_TO", "")
     if not all([host, user, senha, destinatarios]):
         print("[aviso] Credenciais de e-mail não configuradas — pulando essa etapa.")
         return
