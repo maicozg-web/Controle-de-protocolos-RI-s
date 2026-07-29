@@ -134,9 +134,17 @@ def consultar_um_protocolo(page, protocolo, senha):
     senha_input.fill(senha)
 
     page.click("button[type='submit']")
-    page.wait_for_timeout(2500)
+    page.wait_for_timeout(1500)
 
-    resultado_texto = page.locator(".ca-right").inner_text()
+    resultado_texto = ""
+    for _tentativa in range(8):
+        try:
+            resultado_texto = page.locator(".ca-right").inner_text()
+        except Exception:
+            resultado_texto = ""
+        if len(resultado_texto.strip()) > 30:
+            break
+        page.wait_for_timeout(1500)
 
     def campo(rotulo):
         m = re.search(rf"{rotulo}\s*\n?\s*([^\n]+)", resultado_texto, re.IGNORECASE)
@@ -144,6 +152,9 @@ def consultar_um_protocolo(page, protocolo, senha):
 
     if "não encontrad" in resultado_texto.lower():
         return {"protocolo": protocolo, "erro": "Protocolo não encontrado. Confira código/senha."}
+
+    if len(resultado_texto.strip()) <= 30:
+        return {"protocolo": protocolo, "erro": "Não foi possível carregar os dados do site (tempo esgotado). Tente novamente na próxima consulta."}
 
     dados = {
         "protocolo": protocolo,
@@ -303,13 +314,48 @@ def gerar_planilha(resultados):
     return REPORT_PATH
 
 
+def ler_status_anterior(sh):
+    """Lê o estado anterior da aba Status para permitir detectar mudanças depois."""
+    try:
+        ws = sh.worksheet("Status")
+    except Exception:
+        return {}
+    try:
+        valores = ws.get_all_values()
+    except Exception:
+        return {}
+    if not valores:
+        return {}
+    headers = valores[0]
+    try:
+        idx_protocolo = headers.index("Protocolo")
+        idx_situacao = headers.index("Situação Atual")
+        idx_qtd = headers.index("Qtde Exigências")
+    except ValueError:
+        return {}
+    anterior = {}
+    for linha in valores[1:]:
+        if len(linha) <= max(idx_protocolo, idx_situacao, idx_qtd):
+            continue
+        protocolo = linha[idx_protocolo].strip()
+        if not protocolo:
+            continue
+        anterior[protocolo] = {
+            "situacao": linha[idx_situacao].strip(),
+            "qtd_exigencias": linha[idx_qtd].strip(),
+        }
+    return anterior
+
+
 def atualizar_google_sheets(resultados):
     _, sh = _google_client()
     if sh is None:
         print("[aviso] Credenciais do Google Sheets não configuradas — pulando essa etapa.")
-        return
+        return []
 
     import gspread
+
+    anterior = ler_status_anterior(sh)
 
     try:
         ws = sh.worksheet("Status")
@@ -395,6 +441,37 @@ def atualizar_google_sheets(resultados):
 
     print("Google Sheets (aba 'Status') atualizado com formatação.")
 
+    mudancas = []
+    for d in resultados:
+        protocolo = str(d.get("protocolo", ""))
+        info_antiga = anterior.get(protocolo)
+        if info_antiga is None:
+            continue
+        if d.get("erro"):
+            continue
+        situacao_antiga = info_antiga.get("situacao", "")
+        situacao_nova = d.get("situacao") or ""
+        try:
+            qtd_antiga = int(info_antiga.get("qtd_exigencias", "0") or "0")
+        except ValueError:
+            qtd_antiga = 0
+        qtd_nova = len(d.get("exigencias", []))
+
+        mudou_situacao = situacao_antiga and situacao_nova and situacao_antiga != situacao_nova
+        mudou_exigencia = qtd_nova > qtd_antiga
+
+        if mudou_situacao or mudou_exigencia:
+            mudancas.append({
+                "protocolo": protocolo,
+                "referencia": d.get("referencia", ""),
+                "situacao_antiga": situacao_antiga,
+                "situacao_nova": situacao_nova,
+                "qtd_antiga": qtd_antiga,
+                "qtd_nova": qtd_nova,
+            })
+
+    return mudancas
+
 
 def enviar_email(resultados, anexo_planilha):
     host = os.environ.get("EMAIL_HOST")
@@ -453,6 +530,45 @@ def enviar_email(resultados, anexo_planilha):
     print("E-mail enviado.")
 
 
+def enviar_alerta_mudancas(mudancas):
+    if not mudancas:
+        print("Nenhuma mudança de status/exigência detectada desde a última consulta.")
+        return
+
+    host = os.environ.get("EMAIL_HOST")
+    port = int(os.environ.get("EMAIL_PORT", "587"))
+    user = os.environ.get("EMAIL_USER")
+    senha = os.environ.get("EMAIL_PASS")
+    destinatarios = os.environ.get("EMAIL_TO", "")
+    if not all([host, user, senha, destinatarios]):
+        print("[aviso] Credenciais de e-mail não configuradas — pulando alerta de mudanças.")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Alerta de mudança — Protocolos RI ({len(mudancas)})"
+    msg["From"] = user
+    msg["To"] = destinatarios
+
+    linhas = ["Foram detectadas mudanças nos protocolos abaixo, após a consulta mais recente ao RI Indaial:", ""]
+    for m in mudancas:
+        linhas.append(f"Protocolo {m['protocolo']} ({m['referencia']}):")
+        if m["situacao_antiga"] != m["situacao_nova"]:
+            linhas.append(f"  - Situação: \"{m['situacao_antiga']}\" -> \"{m['situacao_nova']}\"")
+        if m["qtd_nova"] > m["qtd_antiga"]:
+            linhas.append(f"  - Exigências: {m['qtd_antiga']} -> {m['qtd_nova']} (nova exigência registrada)")
+        linhas.append("")
+
+    linhas.append("Confira os detalhes completos na planilha (aba 'Status') ou no painel web.")
+    msg.set_content("\n".join(linhas))
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(host, port) as server:
+        server.starttls(context=context)
+        server.login(user, senha)
+        server.send_message(msg)
+    print(f"Alerta de mudança enviado ({len(mudancas)} protocolo(s)).")
+
+
 if __name__ == "__main__":
     protocolos_cfg = carregar_protocolos()
     if not protocolos_cfg:
@@ -460,6 +576,7 @@ if __name__ == "__main__":
     else:
         resultados = rodar_consultas(protocolos_cfg)
         planilha = gerar_planilha(resultados)
-        atualizar_google_sheets(resultados)
+        mudancas = atualizar_google_sheets(resultados)
         enviar_email(resultados, planilha)
+        enviar_alerta_mudancas(mudancas)
     print("Concluído.")
