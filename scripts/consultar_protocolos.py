@@ -94,14 +94,20 @@ def carregar_protocolos():
         _, sh = _google_client()
         if sh is not None:
             ws = sh.worksheet("Cadastro")
-            registros = ws.get_all_records(expected_headers=["Protocolo", "Senha", "Referência"])
+            registros = ws.get_all_records(expected_headers=["Protocolo", "Senha", "Referência", "Interessado"])
             protocolos = []
             for r in registros:
                 protocolo = str(r.get("Protocolo", "")).strip()
                 senha = str(r.get("Senha", "")).strip()
                 referencia = str(r.get("Referência", r.get("Referencia", ""))).strip()
+                grupo_interessado = str(r.get("Interessado", "")).strip()
                 if protocolo and senha:
-                    protocolos.append({"protocolo": protocolo, "senha": senha, "referencia": referencia})
+                    protocolos.append({
+                        "protocolo": protocolo,
+                        "senha": senha,
+                        "referencia": referencia,
+                        "grupo_interessado": grupo_interessado,
+                    })
             if protocolos:
                 print(f"Carregados {len(protocolos)} protocolos da aba 'Cadastro'.")
                 return protocolos
@@ -211,9 +217,11 @@ def rodar_consultas(protocolos_cfg):
             protocolo = item["protocolo"]
             senha = item["senha"]
             referencia = item.get("referencia", "")
+            grupo_interessado = item.get("grupo_interessado", "")
             print(f"Consultando protocolo {protocolo}...")
             dados = consultar_um_protocolo(page, protocolo, senha)
             dados["referencia"] = referencia
+            dados["grupo_interessado"] = grupo_interessado
 
             if dados.get("exigencia_links"):
                 dados["pdfs"] = baixar_pdfs_exigencia(page, protocolo, dados["exigencia_links"])
@@ -464,6 +472,7 @@ def atualizar_google_sheets(resultados):
             mudancas.append({
                 "protocolo": protocolo,
                 "referencia": d.get("referencia", ""),
+                "grupo_interessado": d.get("grupo_interessado", ""),
                 "situacao_antiga": situacao_antiga,
                 "situacao_nova": situacao_nova,
                 "qtd_antiga": qtd_antiga,
@@ -530,6 +539,19 @@ def enviar_email(resultados, anexo_planilha):
     print("E-mail enviado.")
 
 
+ROTEAMENTO_EMAILS = {
+    "GERALOTE": ["Vendas@geralote.com.br", "maicozg@gmail.com"],
+    "DLV": ["dlvconstroi@gmail.com", "maicozg@gmail.com"],
+    "GREIDE ENGENHARIA": ["lais@greideengenharia.com.br", "maicozg@gmail.com"],
+    "GREIDE CONSTRUTORA": ["compras@greideengenharia.com.br", "maicozg@gmail.com"],
+}
+
+
+def destinatarios_para_grupo(grupo_interessado, destinatarios_padrao):
+    chave = (grupo_interessado or "").strip().upper()
+    return ROTEAMENTO_EMAILS.get(chave, destinatarios_padrao)
+
+
 def enviar_alerta_mudancas(mudancas):
     if not mudancas:
         print("Nenhuma mudança de status/exigência detectada desde a última consulta.")
@@ -539,15 +561,30 @@ def enviar_alerta_mudancas(mudancas):
     port = int(os.environ.get("EMAIL_PORT", "587"))
     user = os.environ.get("EMAIL_USER")
     senha = os.environ.get("EMAIL_PASS")
-    destinatarios = os.environ.get("EMAIL_TO", "")
-    if not all([host, user, senha, destinatarios]):
+    email_padrao_str = os.environ.get("EMAIL_TO", "")
+    if not all([host, user, senha]):
         print("[aviso] Credenciais de e-mail não configuradas — pulando alerta de mudanças.")
         return
 
+    destinatarios_padrao = [e.strip() for e in email_padrao_str.split(",") if e.strip()]
+
+    grupos = {}
+    for m in mudancas:
+        destinatarios = destinatarios_para_grupo(m.get("grupo_interessado"), destinatarios_padrao)
+        if not destinatarios:
+            continue
+        chave = tuple(sorted(set(destinatarios)))
+        grupos.setdefault(chave, []).append(m)
+
+    for destinatarios, lista in grupos.items():
+        _enviar_um_alerta(host, port, user, senha, list(destinatarios), lista)
+
+
+def _enviar_um_alerta(host, port, user, senha, destinatarios, mudancas):
     msg = EmailMessage()
     msg["Subject"] = f"Alerta de mudança — Protocolos RI ({len(mudancas)})"
     msg["From"] = user
-    msg["To"] = destinatarios
+    msg["To"] = ", ".join(destinatarios)
 
     linhas = ["Foram detectadas mudanças nos protocolos abaixo, após a consulta mais recente ao RI Indaial:", ""]
     for m in mudancas:
@@ -566,7 +603,7 @@ def enviar_alerta_mudancas(mudancas):
         server.starttls(context=context)
         server.login(user, senha)
         server.send_message(msg)
-    print(f"Alerta de mudança enviado ({len(mudancas)} protocolo(s)).")
+    print(f"Alerta de mudança enviado para {', '.join(destinatarios)} ({len(mudancas)} protocolo(s)).")
 
 
 if __name__ == "__main__":
