@@ -322,6 +322,43 @@ def gerar_planilha(resultados):
     return REPORT_PATH
 
 
+def esta_pronto_para_retirada(situacao):
+    return bool(situacao) and "pronto para retirada" in situacao.lower()
+
+
+def criar_evento_retirada(referencia, protocolo):
+    creds_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    calendar_id = os.environ.get("GOOGLE_CALENDAR_ID")
+    if not creds_json or not calendar_id:
+        print("[aviso] Google Calendar não configurado — pulando criação de evento.")
+        return
+    try:
+        from google.oauth2.service_account import Credentials
+        from google.auth.transport.requests import AuthorizedSession
+
+        creds_dict = json.loads(creds_json)
+        scopes = ["https://www.googleapis.com/auth/calendar.events"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        session = AuthorizedSession(creds)
+
+        hoje = date.today().isoformat()
+        titulo_ref = referencia.strip() if referencia else protocolo
+        evento = {
+            "summary": f"Retirar Matrículas ({titulo_ref})",
+            "start": {"dateTime": f"{hoje}T08:00:00", "timeZone": "America/Sao_Paulo"},
+            "end": {"dateTime": f"{hoje}T18:00:00", "timeZone": "America/Sao_Paulo"},
+            "description": f"Protocolo {protocolo} pronto para retirada no RI Indaial.",
+        }
+        url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+        resp = session.post(url, json=evento, timeout=15)
+        if resp.status_code in (200, 201):
+            print(f"Evento de retirada criado na agenda para o protocolo {protocolo}.")
+        else:
+            print(f"[aviso] Falha ao criar evento na agenda ({resp.status_code}): {resp.text[:200]}")
+    except Exception as e:
+        print(f"[aviso] Erro ao criar evento na agenda: {e}")
+
+
 def ler_status_anterior(sh):
     """Lê o estado anterior da aba Status para permitir detectar mudanças depois."""
     try:
@@ -448,6 +485,16 @@ def atualizar_google_sheets(resultados):
         sh.batch_update({"requests": requests})
 
     print("Google Sheets (aba 'Status') atualizado com formatação.")
+
+    for d in resultados:
+        if d.get("erro"):
+            continue
+        protocolo_ev = str(d.get("protocolo", ""))
+        situacao_nova_ev = d.get("situacao") or ""
+        info_antiga_ev = anterior.get(protocolo_ev, {})
+        situacao_antiga_ev = info_antiga_ev.get("situacao", "")
+        if esta_pronto_para_retirada(situacao_nova_ev) and not esta_pronto_para_retirada(situacao_antiga_ev):
+            criar_evento_retirada(d.get("referencia", ""), protocolo_ev)
 
     mudancas = []
     for d in resultados:
