@@ -26,6 +26,14 @@ import re
 import smtplib
 import ssl
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
+
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def agora_br():
+    """Retorna o horário atual já no fuso do Brasil (evita gravar horário UTC do servidor)."""
+    return datetime.now(FUSO_BR)
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -253,7 +261,7 @@ def gerar_planilha(resultados):
     ws.row_dimensions[1].height = 28
 
     ws.merge_cells(f"A2:{last_col}2")
-    ws["A2"] = f"Atualizado automaticamente em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws["A2"] = f"Atualizado automaticamente em {agora_br().strftime('%d/%m/%Y %H:%M')}"
     ws["A2"].font = Font(name="Arial", size=10, italic=True, color=NAVY)
 
     headers = ["Protocolo", "Referência", "Interessado", "Solicitante", "Natureza",
@@ -267,7 +275,7 @@ def gerar_planilha(resultados):
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.row_dimensions[header_row].height = 32
 
-    today = date.today()
+    today = agora_br().date()
     row = header_row + 1
     for d in resultados:
         if d.get("erro"):
@@ -307,7 +315,7 @@ def gerar_planilha(resultados):
                 c.font = Font(name="Arial", size=10)
 
         ultima_col = 11 + max_exig
-        c = ws.cell(row=row, column=ultima_col, value=datetime.now().strftime("%d/%m/%Y %H:%M"))
+        c = ws.cell(row=row, column=ultima_col, value=agora_br().strftime("%d/%m/%Y %H:%M"))
         c.font = Font(name="Arial", size=10)
         c.fill = PatternFill("solid", fgColor=fill)
 
@@ -341,7 +349,7 @@ def criar_evento_retirada(referencia, protocolo):
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         session = AuthorizedSession(creds)
 
-        hoje = date.today().isoformat()
+        hoje = agora_br().date().isoformat()
         titulo_ref = referencia.strip() if referencia else protocolo
         evento = {
             "summary": f"Retirar Matrículas ({titulo_ref})",
@@ -419,8 +427,8 @@ def atualizar_google_sheets(resultados):
     except Exception:
         pass
 
-    hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
-    today = date.today()
+    hoje = agora_br().strftime("%d/%m/%Y %H:%M")
+    today = agora_br().date()
     linhas = [headers]
     cores_linhas = []
 
@@ -543,11 +551,11 @@ def enviar_email(resultados, anexo_planilha):
     vencidos = sum(
         1 for d in resultados
         if not d.get("erro") and parse_br_date(d.get("prazoQualificacao"))
-        and parse_br_date(d.get("prazoQualificacao")) < date.today()
+        and parse_br_date(d.get("prazoQualificacao")) < agora_br().date()
     )
 
     msg = EmailMessage()
-    msg["Subject"] = f"Relatório de Protocolos RI — {datetime.now().strftime('%d/%m/%Y')}"
+    msg["Subject"] = f"Relatório de Protocolos RI — {agora_br().strftime('%d/%m/%Y')}"
     msg["From"] = user
     msg["To"] = destinatarios
     corpo = (
